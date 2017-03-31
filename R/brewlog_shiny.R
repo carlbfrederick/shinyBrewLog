@@ -1,23 +1,36 @@
-#' Title
+#' Run the Shiny Brew Log
 #'
-#' @param dbName
-#' @param xmlRecipe
+#' @param dbName A SQLite "brewlog" database (path included if not present in
+#'               home directory)
+#' @param xmlRecipe A beerXML file to pull the recipe stats
 #'
 #' @return
 #' @export
 #'
 #' @import shiny
 #' @import shinyTime
+#' @import dplyr
 #'
 brewlog <- function(dbName, xmlRecipe = NULL) {
   #Prep Function
   require(shiny)
   require(shinyTime)
 
+  #Check to see if database exists for batch_id
+  if (!file.exists(dbName)) {
+    batchID <-1
+    oldBrews <- NULL
+  } else {
+    oldBrews <- readRDS(dbName)
+    batchID <- max(oldBrews$batch_id, na.rm=TRUE) + 1
+  }
+
+  #initialize new row
+  newBrew <- newBrewLog_db()
+
   #RadioButton inputs
   brewSalts <- c("", "Gypsum", "Calcium Chloride", "Epsom Salt", "Table Salt", "Magnesium Chloride", "Chalk", "Baking Soda", "Slaked Lime", "Lye")
   pHAgents <- c("", "Lactic Acid 88%", "Phosphoric Acid 10%")
-
 
   #Preload Info from recipe if exists
   shinyApp(
@@ -95,7 +108,7 @@ brewlog <- function(dbName, xmlRecipe = NULL) {
         )
       )
     ),
-    server = function(input, output) {
+    server = function(input, output, session) {
       output$rec_title <- renderUI({
         inFile <- input$rec_xml
 
@@ -107,7 +120,22 @@ brewlog <- function(dbName, xmlRecipe = NULL) {
             )
           )
 
-        recipe_obj <- importBXML(inFile$datapath)
+        #Load xml file
+        recipe_obj <- reactive({
+          importBXML(inFile$datapath) %>%
+            tibble::as_data_frame()
+        })
+
+        #Write data newBrewlog
+        newBrew <- eventReactive(input$write_data, {
+          out <- newBrewLog_db()[1, c("recipe_title", "style", "type", "category",
+                                      "vol_postB_target", "vol_preB_target",
+                                      "est_og", "est_fg")] <- recipe_obj()
+          out$batch_id = batchID
+          out$brewDate = input$date_brew
+
+        })
+
 
         return(
           fluidPage(
@@ -124,6 +152,7 @@ brewlog <- function(dbName, xmlRecipe = NULL) {
           )
         )
       })
+
       # output$rec_type <- recipe_obj$TYPE
       # output$rec_style <- recipe_obj$STYLE
       # output$rec_cat <- recipe_obj$CAT
